@@ -24,7 +24,7 @@
       "drf"
     ],
     "dependsOn": [
-      "extension-database"
+      "extension-rdbms"
     ],
     "springProfiles": [
       "security"
