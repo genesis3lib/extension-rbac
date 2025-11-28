@@ -2,6 +2,31 @@ from rest_framework.permissions import BasePermission
 from .models import UserRole
 
 
+def _has_role(user, role):
+    """
+    Check if user has a specific role.
+    Works with both Auth User objects (Auth0User, OktaUser, StytchUser)
+    and database User objects.
+    """
+    # Try has_role method first (works for both auth and db users)
+    if hasattr(user, 'has_role'):
+        return user.has_role(role)
+    # Fallback to checking roles attribute directly
+    if hasattr(user, 'roles'):
+        return role in user.roles
+    return False
+
+
+def _is_admin(user):
+    """Check if user is admin (works with both auth and db user objects)"""
+    return _has_role(user, 'admin') or _has_role(user, UserRole.ADMIN)
+
+
+def _is_root(user):
+    """Check if user is root (works with both auth and db user objects)"""
+    return _has_role(user, 'root') or _has_role(user, UserRole.ROOT)
+
+
 class IsRoot(BasePermission):
     """
     Allows access only to root users.
@@ -11,7 +36,7 @@ class IsRoot(BasePermission):
     def has_permission(self, request, view):
         if not request.user or not request.user.is_authenticated:
             return False
-        return request.user.is_root()
+        return _is_root(request.user)
 
 
 class IsAdmin(BasePermission):
@@ -23,7 +48,7 @@ class IsAdmin(BasePermission):
     def has_permission(self, request, view):
         if not request.user or not request.user.is_authenticated:
             return False
-        return request.user.is_admin()
+        return _is_admin(request.user) or _is_root(request.user)
 
 
 class IsAdminOrReadOnly(BasePermission):
@@ -37,7 +62,7 @@ class IsAdminOrReadOnly(BasePermission):
             return True
         if not request.user or not request.user.is_authenticated:
             return False
-        return request.user.is_admin()
+        return _is_admin(request.user) or _is_root(request.user)
 
 
 class HasRole(BasePermission):
@@ -59,7 +84,7 @@ class HasRole(BasePermission):
         if not required_roles:
             return True
 
-        return any(request.user.has_role(role) for role in required_roles)
+        return any(_has_role(request.user, role) for role in required_roles)
 
 
 class IsOwnerOrAdmin(BasePermission):
@@ -75,12 +100,14 @@ class IsOwnerOrAdmin(BasePermission):
             return False
 
         # Admins have full access
-        if request.user.is_admin():
+        if _is_admin(request.user) or _is_root(request.user):
             return True
 
         # Check if user owns the object
         owner = getattr(obj, 'owner', None) or getattr(obj, 'user', None)
         if owner:
-            return owner.id == request.user.id
+            # Compare by id or external_auth_id
+            user_id = getattr(request.user, 'id', None)
+            return owner.id == user_id or (hasattr(owner, 'external_auth_id') and owner.external_auth_id == user_id)
 
         return False

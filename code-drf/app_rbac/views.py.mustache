@@ -23,20 +23,25 @@ class UserProfileView(APIView):
 
     def get(self, request):
         """Get the current user's profile from database"""
-        # Extract email from Auth0 JWT token payload
-        auth0_user = request.user
-        email = auth0_user.email
+        # Extract user info from authenticated user
+        auth_user = request.user
+        email = getattr(auth_user, 'email', None)
+        external_auth_id = getattr(auth_user, 'id', None)
 
-        logger.debug(f"Fetching profile for user: {email}")
+        logger.debug(f"Fetching profile for user: email={email}, external_auth_id={external_auth_id}")
 
-        # Fetch actual user from database (should exist after middleware sync)
-        try:
-            db_user = User.objects.get(email=email, deleted=False)
-        except User.DoesNotExist:
+        # Try by email first, fallback to external_auth_id if email not in JWT
+        db_user = None
+        if email:
+            db_user = UserService.find_by_email(email)
+        if not db_user and external_auth_id:
+            db_user = UserService.find_by_external_auth_id(external_auth_id)
+
+        if not db_user:
             return Response({
                 'requestId': str(uuid.uuid4()),
                 'error': 'User not found in database',
-                'message': f'User with email {email} not found'
+                'message': f'User not found: email={email}, external_auth_id={external_auth_id}'
             }, status=status.HTTP_404_NOT_FOUND)
 
         serializer = UserProfileSerializer(db_user)
@@ -86,6 +91,17 @@ class UserService:
             return None
 
     @staticmethod
+    def find_by_external_auth_id(external_id):
+        """Find user by external auth ID only (without provider)"""
+        try:
+            return User.objects.get(
+                external_auth_id=external_id,
+                deleted=False
+            )
+        except User.DoesNotExist:
+            return None
+
+    @staticmethod
     def find_by_username(username):
         """Find user by username"""
         try:
@@ -93,8 +109,21 @@ class UserService:
         except User.DoesNotExist:
             return None
 
+    @staticmethod
+    def find_by_slug(slug):
+        """Find user by slug"""
+        try:
+            return User.objects.get(slug=slug, deleted=False)
+        except User.DoesNotExist:
+            return None
+
+    @staticmethod
+    def find_by_tenant(tenant_id):
+        """Find all users by tenant ID"""
+        return list(User.objects.filter(tenant_id=tenant_id, deleted=False))
+
     @classmethod
-    def create_or_update_user(cls, email, external_provider, external_id,
+    def create_or_update_user(cls, tenant_id, email, external_provider, external_id,
                               first_name=None, last_name=None, picture=None):
         """Create or update a user from external auth"""
         existing_user = cls.find_by_external_auth(external_provider, external_id)
@@ -124,6 +153,7 @@ class UserService:
                 counter += 1
 
             user = User(
+                tenant_id=tenant_id,
                 username=username,
                 email=email,
                 external_auth_provider=external_provider,
