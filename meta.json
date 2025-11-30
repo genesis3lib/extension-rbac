@@ -32,7 +32,12 @@
       "security"
     ],
     "djangoSettings": [],
-    "allowMultiple": false
+    "allowMultiple": false,
+    "providesFragments": {
+      "django-settings": {
+        "mode": "append"
+      }
+    }
   },
   "scaffoldConfigTemplate": [
     {
