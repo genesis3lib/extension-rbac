@@ -47,6 +47,10 @@ public class UserEntity extends BaseEntity {
     @Builder.Default
     private Boolean enabled = true;
 
+    @Column(name = "email_verified", nullable = false)
+    @Builder.Default
+    private Boolean emailVerified = false;
+
     @Column(name = "roles")
     private java.util.List<{{javaPackageFull}}.jpa.enumtype.UserRole> roles;
 

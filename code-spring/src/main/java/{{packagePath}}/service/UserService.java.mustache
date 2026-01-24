@@ -45,14 +45,43 @@ public class UserService {
         return userRepository.findBySlugAndDeletedFalse(slug);
     }
 
+    /**
+     * Creates or updates a user from external authentication provider.
+     *
+     * @param tenantId Tenant ID (optional, can be null for single-tenant apps)
+     * @param email User's email address
+     * @param externalProvider External auth provider (e.g., "auth0", "google-oauth2")
+     * @param externalId External auth ID (e.g., "auth0|123456")
+     * @param firstName User's first name
+     * @param lastName User's last name
+     * @param picture User's profile picture URL
+     * @param isEmailVerified Whether the user's email is verified
+     * @param createUserOnFirstLogin Whether to create user if not exists
+     * @param updateUserOnEachLogin Whether to update user profile on each login
+     * @return The created or updated user entity
+     */
     public UserEntity createOrUpdateUser(String tenantId, String email, String externalProvider, String externalId,
-                                        String firstName, String lastName, String picture) {
+                                        String firstName, String lastName, String picture,
+                                        boolean isEmailVerified, boolean createUserOnFirstLogin,
+                                        boolean updateUserOnEachLogin) {
         Optional<UserEntity> existingUser = findByExternalAuth(externalProvider, externalId);
 
         UserEntity user;
         if (existingUser.isPresent()) {
             user = existingUser.get();
+            // Only update if configured to do so
+            if (!updateUserOnEachLogin) {
+                log.debug("User exists and updateUserOnEachLogin=false, skipping update for: {}", email);
+                return user;
+            }
+            log.debug("Updating existing user: {}", email);
         } else {
+            // Only create if configured to do so
+            if (!createUserOnFirstLogin) {
+                log.warn("User not found and createUserOnFirstLogin=false, rejecting: {}", email);
+                throw new IllegalStateException("User not found and automatic user creation is disabled");
+            }
+
             List<UserRole> roles = new java.util.ArrayList<>(List.of(UserRole.USER));
             if (StringUtils.equalsIgnoreCase(rootUser, email)) {
                 log.warn("Creating root user: {}", email);
@@ -69,6 +98,7 @@ public class UserService {
                     .externalAuthId(externalId)
                     .roles(roles)
                     .enabled(true)
+                    .emailVerified(isEmailVerified)
                     .build();
             log.info("Creating new user: {}", email);
         }
@@ -78,10 +108,20 @@ public class UserService {
         user.setLastName(lastName);
         user.setPicture(picture);
         user.setEmail(email);
+        user.setEmailVerified(isEmailVerified);
 
         UserEntity savedUser = userRepository.save(user);
         userRepository.flush(); // Force immediate write to database
         return savedUser;
+    }
+
+    /**
+     * Simple overload for backwards compatibility - creates user on first login, no updates.
+     */
+    public UserEntity createOrUpdateUser(String tenantId, String email, String externalProvider, String externalId,
+                                        String firstName, String lastName, String picture) {
+        return createOrUpdateUser(tenantId, email, externalProvider, externalId,
+                firstName, lastName, picture, true, true, false);
     }
 
     public List<UserEntity> findByTenant(String tenantId) {
